@@ -5,15 +5,16 @@ from requests.auth import HTTPBasicAuth
 from openai import OpenAI
 
 CONFLUENCE_URL = "https://your-domain.atlassian.net/wiki"
-SPACE_KEY = "ENG"
-auth = HTTPBasicAuth(os.getenv("ATLASSIAN_EMAIL"), os.getenv("ATLASSIAN_API_TOKEN"))
+SPACE_KEY = "SITE"
+CONFLUENCE_TOKEN = os.getenv("ATLASSIAN_API_TOKEN")
+HEADERS = {"Authorization": f"Bearer {CONFLUENCE_TOKEN}"}
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def fetch_pages():
     start = 0
     while True:
         url = f"{CONFLUENCE_URL}/rest/api/content?spaceKey={SPACE_KEY}&expand=body.storage&start={start}&limit=50"
-        r = requests.get(url, auth=auth); r.raise_for_status()
+        r = requests.get(url, headers=HEADERS); r.raise_for_status()
         data = r.json(); results = data.get("results", [])
         for p in results:
             yield {

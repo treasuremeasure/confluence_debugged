@@ -1,11 +1,8 @@
 # main.py (Chainlit)
 import os, psycopg2
 import chainlit as cl
-from openai import OpenAI
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-def search_chunks(question: str, top_k: int = 6, metric: str = "cosine"):
+def search_chunks(question: str, top_k: int = 5, metric: str = "cosine"):
     conn = psycopg2.connect(os.getenv("POSTGRES_URL"))
     cur = conn.cursor()
     emb = client.embeddings.create(model="text-embedding-3-small", input=question).data[0].embedding
