@@ -1,14 +1,14 @@
 # ingest.py
-import os, math, time, requests, psycopg2
+import os, requests, psycopg2
 from bs4 import BeautifulSoup
-from requests.auth import HTTPBasicAuth
-from openai import OpenAI
 
-CONFLUENCE_URL = "https://your-domain.atlassian.net/wiki"
+CONFLUENCE_URL = "https://confluence.lamoda.ru"
 SPACE_KEY = "SITE"
 CONFLUENCE_TOKEN = os.getenv("ATLASSIAN_API_TOKEN")
 HEADERS = {"Authorization": f"Bearer {CONFLUENCE_TOKEN}"}
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# адрес твоей embedding модели
+EMBEDDING_URL = os.getenv("EMBEDDING_URL")
 
 def fetch_pages():
     start = 0
@@ -33,9 +33,9 @@ def to_chunks(text, max_chars=2500, overlap=200):
         i += max_chars - overlap
 
 def embed_batch(texts):
-    # батчируйте для экономии
-    resp = client.embeddings.create(model="text-embedding-3-small", input=texts)
-    return [d.embedding for d in resp.data]
+    resp = requests.post(EMBEDDING_URL, json={"inputs": texts})
+    resp.raise_for_status()
+    return resp.json()["embeddings"]
 
 conn = psycopg2.connect(os.getenv("POSTGRES_URL")); conn.autocommit = True
 cur = conn.cursor()
