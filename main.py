@@ -1,26 +1,19 @@
 # main.py
-import os, math, psycopg2, requests
+import os, psycopg2, requests
 import chainlit as cl
 
-EMBEDDING_BASE = os.getenv("EMBEDDING_URL", "").rstrip("/")
-LLM_URL = os.getenv("LLM_URL", "http://127.0.0.1:8001/v1/chat/completions")
-LLM_MODEL = os.getenv("LLM_MODEL", "TheBloke/deepseek-llm-67b-chat-AWQ")
+EMBEDDING_URL = os.getenv("EMBEDDING_URL")
+LLM_URL = os.getenv("LLM_URL")
+LLM_MODEL = os.getenv("LLM_MODEL")
 
-def l2_normalize(vec):
-    s = math.sqrt(sum(x*x for x in vec)) or 1.0
-    return [x/s for x in vec]
+print(EMBEDDING_URL)
+print(LLM_MODEL)
 
 def embed_query(text: str):
     # e5 ожидает префикс "query: "
-    payload = {"inputs": [f"query: {text}"]}
-    # пробуем TEI /embed
-    url = EMBEDDING_BASE + "/embed" if EMBEDDING_BASE else ""
-    r = requests.post(url or EMBEDDING_BASE, json=payload) if EMBEDDING_BASE else None
+    payload = {"inputs_texts": [f"query: {text}"]}
 
-    if r is None or r.status_code == 404:
-        # fallback на корневой /embeddings-стиль
-        r = requests.post(EMBEDDING_BASE or "", json=payload)
-    r.raise_for_status()
+    r = requests.post(EMBEDDING_URL, json=payload)
     js = r.json()
     emb = None
     if "embeddings" in js:
@@ -29,7 +22,6 @@ def embed_query(text: str):
         emb = js["data"][0].get("embedding")
     if emb is None:
         raise RuntimeError(f"Embedding API returned unexpected payload: {js}")
-    return l2_normalize(emb)  # (опц.) L2-норм
 
 def search_chunks(question: str, top_k: int = 5, metric: str = "cosine"):
     conn = psycopg2.connect(os.getenv("POSTGRES_URL"))
@@ -77,6 +69,8 @@ async def on_message(message: cl.Message):
 
     sys = "Ты корпоративный помощник. Отвечай кратко, добавляй ссылки на источники."
     user = f"Вопрос: {question}\n\nКонтекст:\n{context}\n\nОтветь со ссылками на релевантные страницы."
+
+    print(EMBEDDING_URL)
 
     msg = cl.Message(content="")
     await msg.send()

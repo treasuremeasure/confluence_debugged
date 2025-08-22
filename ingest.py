@@ -1,5 +1,5 @@
 # ingest.py
-import os, re, math, requests, psycopg2
+import os, re, requests, psycopg2
 from bs4 import BeautifulSoup
 
 CONFLUENCE_URL = "https://confluence.lamoda.ru"
@@ -7,9 +7,7 @@ SPACE_KEY = "SITE"
 CONFLUENCE_TOKEN = os.getenv("ATLASSIAN_API_TOKEN")
 HEADERS = {"Authorization": f"Bearer {CONFLUENCE_TOKEN}"} if CONFLUENCE_TOKEN else {}
 
-# адрес твоей embedding-модели (база), например: https://host:8000  или https://.../embeddings
-EMBEDDING_BASE = (os.getenv("EMBEDDING_URL") or "").rstrip("/")
-EMBEDDING_TOKEN = os.getenv("EMBEDDING_TOKEN")  # если требуется твоим сервисом
+EMBEDDING_URL = (os.getenv("EMBEDDING_URL"))
 
 def fetch_pages():
     start = 0
@@ -49,57 +47,39 @@ def to_chunks(text, max_chars=2500, overlap=200):
         i += max_chars - overlap
 
 def _embed_post(url: str, payload: dict):
+    """Простой POST без авторизации (токен не нужен). Возвращает requests.Response."""
+    if not url:
+        raise RuntimeError("EMBEDDING_URL не задан")
     headers = {"Content-Type": "application/json"}
-    if EMBEDDING_TOKEN:
-        headers["Authorization"] = f"Bearer {EMBEDDING_TOKEN}"
     r = requests.post(url, json=payload, headers=headers, timeout=60)
+    r.raise_for_status()
     return r
 
-def _l2_norm_vecs(vecs):
-    out = []
-    for v in vecs:
-        n = math.sqrt(sum(x * x for x in v)) or 1.0
-        out.append([x / n for x in v])
-    return out
-
 def embed_batch_passages(texts):
-    """
-    e5 ожидает префикс 'passage: ' для документов.
-    Пытаемся сначала POST {base}/embed (TEI), затем — {base} или {base}/embeddings.
-    Возвращаем список L2-нормированных векторов.
-    """
-    if not EMBEDDING_BASE:
+   
+    if not EMBEDDING_URL:
         raise RuntimeError("EMBEDDING_URL не задан")
 
     prefixed = [f"passage: {t}" for t in texts]
-    payload = {"inputs": prefixed}
+    payload = {"input_texts": prefixed}
 
-    tried = []
-
-    # 1) TEI-стиль: /embed
-    url = f"{EMBEDDING_BASE}/embed"
-    r = _embed_post(url, payload); tried.append((url, r.status_code))
-    if r.status_code == 404:
-        # 2) корневой: /
-        url = EMBEDDING_BASE
-        r = _embed_post(url, payload); tried.append((url, r.status_code))
-        if r.status_code == 404:
-            # 3) /embeddings
-            url = f"{EMBEDDING_BASE}/embeddings"
-            r = _embed_post(url, payload); tried.append((url, r.status_code))
-
-    r.raise_for_status()
+    r = _embed_post(EMBEDDING_URL, payload)
     js = r.json()
 
-    # Поддержка разных форматов ответа
-    if "embeddings" in js:
+    # Разбор двух популярных форматов
+    if isinstance(js, dict) and "embeddings" in js:
         embs = js["embeddings"]
-    elif "data" in js and js["data"] and isinstance(js["data"][0], dict) and "embedding" in js["data"][0]:
-        embs = [d["embedding"] for d in js["data"]]
+    elif isinstance(js, dict) and "data" in js:
+        embs = [item["embedding"] for item in js["data"]]
     else:
-        raise RuntimeError(f"Неожиданный ответ эмбеддинг-сервиса: keys={list(js.keys())}, tried={tried}")
+        raise ValueError(f"Неожиданный формат ответа от эмбеддинга: {js}")
 
-    return _l2_norm_vecs(embs)
+    # Быстрая валидация длины
+    if len(embs) != len(texts):
+        raise ValueError(f"Кол-во эмбеддингов ({len(embs)}) != кол-ву текстов ({len(texts)})")
+
+    return embs
+
 
 # ВАЖНО: для psycopg2 строка должна быть формата postgresql://user:pass@host:port/db
 conn = psycopg2.connect(os.getenv("POSTGRES_URL")); conn.autocommit = True
@@ -132,3 +112,4 @@ for p in fetch_pages():
             """, (p["page_id"], p["title"], SPACE_KEY, p["url"], i + j, chunk, emb))
 
 cur.close(); conn.close()
+
