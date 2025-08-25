@@ -2,13 +2,18 @@
 import os, psycopg2, requests, json
 import chainlit as cl
 from dotenv import load_dotenv
+import logging
+logging.basicConfig(level=logging.DEBUG)
+from loguru import logger
 
 load_dotenv()
 
 EMBEDDING_URL = os.getenv("EMBEDDING_URL")
 LLM_URL = os.getenv("LLM_URL")
-LLM_MODEL = os.getenv("LLM_MODEL").rstrip("/")
+LLM_MODEL = os.getenv("LLM_MODEL")
 EXPECTED_DIM = int(os.getenv("EMBEDDING_DIM", "0"))
+PROJECT_ID = os.getenv("PROJECT_ID")
+TOKEN = os.getenv("TOKEN")
 
 def _is_vector(x):
     return isinstance(x, list) and x and all(isinstance(v, (int, float)) for v in x)
@@ -113,9 +118,9 @@ def embed_query(text: str):
         ]
     }
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
-    r = requests.post(EMBEDDING_URL, json=payload, headers=headers, timeout=(5, 60))
+    r = requests.post(EMBEDDING_URL, json=payload, headers=headers, timeout=(60, 60))
     try:
-        print("Ответ успешно получен (embed_post)", r.status_code)
+        print("Ответ успешно получен (embed_query)", r.status_code)
     except:
         raise requests.HTTPError(f"HTTP {r.status_code}: {r.reason}")
 
@@ -135,7 +140,7 @@ def embed_query(text: str):
 
     return emb  # list[float]
 
-def search_chunks(question: str, top_k: int = 5, metric: str = "cosine"):
+def search_chunks(question: str, top_k: int = 3, metric: str = "cosine"):
     conn = psycopg2.connect(os.getenv("POSTGRES_URL"))
     cur = conn.cursor()
     emb = embed_query(question)
@@ -151,28 +156,48 @@ def search_chunks(question: str, top_k: int = 5, metric: str = "cosine"):
     return [{"title": r[0], "url": r[1], "content": r[2]} for r in rows]
 
 def stream_llm(messages):
+    headers = {
+        'Authorization': f'Bearer {TOKEN}',
+        'x-project-id': PROJECT_ID,
+    }
+    payload = {
+        "messages": messages,
+        "model": LLM_MODEL,
+        "stream": True,
+        "temperature": 0.65,
+        "top_p": 0.9,
+        "top_k": 40,
+        "frequency_penalty": 0.1,
+        "repetition_penalty": 1.05,
+        "length_penalty": 1,
+        "stop": ["math"]
+    }
     url = f"{LLM_URL}/v1/chat/completions"
+    logger.debug(f"Streaming from cloud.ru at {url}")
     with requests.post(
         url,
-        json={"model": LLM_MODEL, "messages": messages, "stream": True},
-        stream=True,
+        json=payload,
+        headers=headers,
+        timeout=120
     ) as r:
-        r.raise_for_status()
+        try:
+            print("Ответ успешно получен (stream_llm)", r.status_code, r.text)
+        except:
+            raise requests.HTTPError(f"HTTP {r.status_code}: {r.reason}")
         for line in r.iter_lines():
             if not line:
                 continue
-            s = line.decode("utf-8")
-            if not s.startswith("data: "):
-                continue
-            data = s[6:].strip()
-            if data == "[DONE]":
-                break
+            if line.startswith(b"data: "):
+                line = line.removeprefix(b"data: ")
             try:
-                token = requests.utils.json.loads(data)["choices"][0]["delta"].get("content")
-                if token:
-                    yield token
-            except Exception:
+                parsed = json.loads(line.decode("utf-8"))
+                delta = parsed["choices"][0]["delta"]
+                if "content" in delta:
+                    yield delta["content"]
+            except Exception as e:
+                logger.warning(f"Stream parsing error: {e}")
                 continue
+            
 
 @cl.on_message
 async def on_message(message: cl.Message):
@@ -180,7 +205,7 @@ async def on_message(message: cl.Message):
     hits = search_chunks(question)
     context = "\n\n".join([f"[{h['title']}]({h['url']})\n{h['content']}" for h in hits])
 
-    sys = "Ты корпоративный помощник. Отвечай кратко, добавляй ссылки на источники."
+    sys = "Ты корпоративный помощник. Отвечай кратко и только на русском даже если в вопросе будут английские слова, добавляй ссылки на страницы, откуда ты берешь информацию."
     user = f"Вопрос: {question}\n\nКонтекст:\n{context}\n\nОтветь со ссылками на релевантные страницы."
 
     print(EMBEDDING_URL)
