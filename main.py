@@ -205,10 +205,8 @@ async def on_message(message: cl.Message):
     hits = search_chunks(question)
     context = "\n\n".join([f"[{h['title']}]({h['url']})\n{h['content']}" for h in hits])
 
-    sys = "Ты корпоративный помощник. Отвечай кратко и только на русском даже если в вопросе будут английские слова, добавляй ссылки на страницы, откуда ты берешь информацию."
-    user = f"Вопрос: {question}\n\nКонтекст:\n{context}\n\nОтветь со ссылками на релевантные страницы."
-
-    print(EMBEDDING_URL)
+    sys = "Ты корпоративный помощник. Отвечай кратко и только на русском даже если в вопросе будут английские слова, добавляй в конце ответа url ссылки, которые ты получил в запросе."
+    user = f"Вопрос: {question}\n\nКонтекст:\n{context}"
 
     msg = cl.Message(content="")
     await msg.send()

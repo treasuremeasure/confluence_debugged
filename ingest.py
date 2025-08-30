@@ -47,6 +47,7 @@ def fetch_pages():  # CHANGED: реализация под Cloud /content/search
         except:
             raise requests.HTTPError(f"HTTP {r.status_code}: {r.reason}")
         data = r.json()
+        print(data)
 
         for item in data.get("results", []):
             page_id = item.get("id")
