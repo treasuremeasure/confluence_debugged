@@ -1,4 +1,3 @@
-# ingest.py
 import os, re, requests, psycopg2
 from urllib.parse import urlparse, parse_qs 
 from bs4 import BeautifulSoup
@@ -19,7 +18,7 @@ EMBEDDING_URL = (os.getenv("EMBEDDING_URL"))
 POSTGRES_URL = os.getenv("POSTGRES_URL")
 
 
-def fetch_pages():  # CHANGED: реализация под Cloud /content/search + follow-up GET /content/{id}?expand=body.storage
+def fetch_pages(): 
     """
     Тянем страницы из одного SPACE по CQL:
       cql = "space=SPACE_KEY AND type=page"
@@ -52,18 +51,16 @@ def fetch_pages():  # CHANGED: реализация под Cloud /content/search
         for item in data.get("results", []):
             page_id = item.get("id")
             title = item.get("title") or ""
-            # второй запрос: тянем body.storage для конкретной страницы
             r2 = session.get(f"{API_BASE}/content/{page_id}",
                              params={"expand": "body.storage"}, headers=headers)
             r2.raise_for_status()
             js2 = r2.json()
-            html = (js2.get("body", {}).get("storage", {}) or {}).get("value", "")  # HTML тела страницы
+            html = (js2.get("body", {}).get("storage", {}) or {}).get("value", "") 
 
             yield {
                 "page_id": page_id,
                 "title": title,
                 "html": html,
-                # Cloud формирует _links для страницы; соберём URL на страницу
                 "url": f"{CONFLUENCE_URL}/spaces/{SPACE_KEY}/pages/{page_id}"
             }
 
@@ -71,7 +68,6 @@ def fetch_pages():  # CHANGED: реализация под Cloud /content/search
         next_rel = (data.get("_links") or {}).get("next")
         if not next_rel:
             break
-        # из next_rel вытаскиваем cursor, чтобы снова ходить на один и тот же endpoint
         q = parse_qs(urlparse(next_rel).query)
         cursor = (q.get("cursor") or [None])[0]
         if not cursor:
@@ -80,29 +76,28 @@ def fetch_pages():  # CHANGED: реализация под Cloud /content/search
 def clean_text(text: str) -> str:
     """Убираем артефакты Confluence и приводим текст в порядок."""
     patterns_to_drop = [
-        r"\{toc[^\}]*\}",              # {toc}, {toc:maxLevel=2}, ...
-        r"\{expand[:\}]?.*?\}",        # {expand} (грубо)
+        r"\{toc[^\}]*\}",              
+        r"\{expand[:\}]?.*?\}",        
         r"^\s*Table of Contents\s*$",
         r"^\s*Показать всё\s*$",
     ]
     for pat in patterns_to_drop:
         text = re.sub(pat, " ", text, flags=re.IGNORECASE | re.MULTILINE | re.DOTALL)
-    text = re.sub(r"[ \t]+", " ", text)         # множественные пробелы -> один
-    text = re.sub(r"\n\s*\n+", "\n\n", text)    # много пустых строк -> одна
+    text = re.sub(r"[ \t]+", " ", text)         
+    text = re.sub(r"\n\s*\n+", "\n\n", text)   
     return text.strip()
 
 def to_chunks(text, max_chars=2500, overlap=200):
-    # NOTE: простой символьный чанкёр; если нужна «аккуратность», режь по абзацам/точкам.
     i = 0
     step = max_chars - overlap
-    if step <= 0:  # FIX: защита от неправильных параметров
+    if step <= 0:  
         step = max_chars
     while i < len(text):
         yield text[i:i + max_chars]
         i += step
 
 def _embed_post(url: str, payload: dict):
-    """POST к сервису эмбеддингов. Токен не используем — при необходимости добавь headers."""
+    """POST к сервису эмбеддингов."""
     if not url:
         raise ValueError("EMBEDDING_URL не задан")
     headers = {"Content-Type": "application/json"}
@@ -121,14 +116,11 @@ def _is_list_of_vectors(x):
             and all(isinstance(v, list) and len(v) > 0 and all(isinstance(t, (int, float)) for t in v) for v in x))
 
 def _unwrap_once(x):
-    # строка JSON → объект
     if isinstance(x, str):
         try:
             return json.loads(x)
         except json.JSONDecodeError:
-            # если это вовсе не JSON — оставим как есть
             return x
-    # некоторые рантаймы отдают ещё один уровень-обёртку длины 1
     if isinstance(x, list) and len(x) == 1 and isinstance(x[0], (list, str)):
         return _unwrap_once(x[0])
     return x
@@ -150,14 +142,13 @@ def _parse_embeddings_triton(js: dict, expected_n: int):
         n, d = shape
         flat = data if isinstance(data, list) else []
         embs = [flat[i*d:(i+1)*d] for i in range(n)] if d and flat else []
-        return embs  # БЕЗ проверок количества
+        return embs 
 
     # BYTES + hg_jsonlist
     if dtype == "BYTES" and ctype == "hg_jsonlist":
         vectors = []
         for item in (data if isinstance(data, list) else []):
             item = _unwrap_once(item)          # [[[...]]] -> [[...]] -> [...]
-            # !!! ключевой момент: не использовать extend на плоском векторе
             if _is_vector(item):               # один вектор
                 vectors.append(item)
             elif _is_list_of_vectors(item):    # список векторов
@@ -177,7 +168,6 @@ def _parse_embeddings_triton(js: dict, expected_n: int):
         return vectors
 
     print(f"[embed] warning: неожиданный формат выхода: dtype={dtype}, content_type={ctype}, shape={shape}; пытаюсь вернуть как есть")
-    # Последняя попытка нормализации
     if _is_vector(data):
         return [data]
     if _is_list_of_vectors(data):
