@@ -83,7 +83,6 @@ def _parse_embeddings_response(js):
                         vectors.extend(item2)
                     elif isinstance(item2, list) and all(isinstance(x, (int, float)) for x in item2):
                         vectors.append(item2)
-            # Если вдруг вернулся "плоский" список чисел (ошибка парсинга) — обернём как один вектор
             if vectors and all(isinstance(x, (int, float)) for x in vectors):
                 return [vectors]
             return vectors
@@ -92,7 +91,6 @@ def _parse_embeddings_response(js):
 
 def _fit_dim(vec, target):
     if not target or target <= 0:
-        # без подгонки — вернуть как есть
         return vec
     n = len(vec)
     if n == target:
