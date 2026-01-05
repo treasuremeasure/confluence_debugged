@@ -1,21 +1,18 @@
-Пет-проект: RAG-Confluence App
+Pet Project: RAG-Confluence App
+Goal: Simplify interaction with Confluence using Retrieval-Augmented Generation (RAG)
+Stack: Chainlit, RAG, Flyway, Deepseek
+Workflow:
 
-Цель: упростить взаимодействие с Confluence с помощью Retrieval-Augmented Generation (RAG).
+Data loading:
 
-Стек: Chainlit, RAG, Flyway, Deepseek, 
-
-Cхема работы
-
-1) Загрузка данных:
-
-а) Скрипт извлекает указанные пространства Confluence.
-б) Разбивает контент на чанки.
-в) Преобразует чанки в вектора с помощью эмбеддинг модели
-е) Кладет вектора в векторную БД PostgreSQL.
+- A script extracts specified Confluence spaces
+- Splits content into chunks
+- Converts chunks into vectors using an embedding model
+- Stores vectors in a PostgreSQL vector database
 
 
-2) Обработка запросов:
+Query processing:
 
-а) Запрос пользователя преобразуется в вектор.
-б) Извлекаются ближайшие чанки по косинусной близости.
-в) Запрос + чанки передаются в LLM для генерации ответа.
+- The user's query is converted into a vector
+- Nearest chunks are retrieved based on cosine similarity
+- The query + chunks are passed to an LLM for answer generation
